@@ -1,0 +1,87 @@
+.table-block-area {
+  position: relative;
+  padding-bottom: 0;
+  overflow: auto;
+  transition: padding linear 0.3s;
+}
+
+.table-block-area:hover {
+  padding-bottom: 80px;
+}
+
+.table-block-tools-button {
+  opacity: 0;
+  transition: opacity linear 0.15s;
+}
+
+.table-block-area:hover .table-block-tools-button {
+  opacity: 1;
+}
+
+.table-block-tools {
+  opacity: 0;
+  transition: opacity linear 0.15s;
+}
+
+.table-block-area:hover .table-block-tools {
+  opacity: 1;
+}
+
+.table-block-cell {
+  position: relative;
+  min-width: 30px;
+  min-height: 25px;
+  padding: 0 var(--size-4-2);
+  z-index: 1;
+}
+
+.table-block-cell > p {
+  margin: var(--size-2-2) 0;
+}
+
+.table-block-cell-border {
+  position: absolute;
+  left: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  border: 1px solid transparent;
+  z-index: 0;
+}
+
+.table-block-cell-edit {
+  padding-right: 150px!important;
+}
+
+.table-block-cell-edit .table-block-cell {
+  opacity: 0;
+}
+
+.table-block-cell-edit .table-block-cell-border {
+  opacity: 0;
+}
+
+.table-block-cell-input {
+  position: absolute;
+  left: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1;
+}
+
+.table-block-selected {
+  background: transparent;
+}
+
+.table-block-area:hover .table-block-selected {
+  background: var(--titlebar-background);
+}
+
+.table-block-cell-selected {
+  border: 1px solid transparent;
+}
+
+.table-block-area:hover .table-block-cell-selected {
+  border: 1px solid var(--nav-item-color-active);
+}
