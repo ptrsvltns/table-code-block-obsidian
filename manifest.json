@@ -1,7 +1,7 @@
 {
-	"id": "table-block-obsidian",
-	"name": "Table Block",
-	"version": "1.0.0",
+	"id": "table-codeblock-obsidian",
+	"name": "Table Code Block",
+	"version": "1.0.1",
 	"minAppVersion": "0.15.0",
 	"description": "Table Block",
 	"author": "ptrsvltns",

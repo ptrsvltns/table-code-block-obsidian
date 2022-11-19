@@ -6,7 +6,7 @@ on:
       - "*"
 
 env:
-  PLUGIN_NAME: hidden-folder-obsidian
+  PLUGIN_NAME: table-codeblock-obsidian
 
 jobs:
   build:
