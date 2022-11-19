@@ -14,11 +14,11 @@ Table Code Block in Obsidian:
   - Headings  
   - Links  
   - Checkbox  
-  - Html  
+  - HTML  
   - Bold  
   - Italic  
   - Bold and Italic  
-  - Blockquotes  
+  - Block Quotes  
   - Lists  
   - Horizontal Rules  
 - Translation  
