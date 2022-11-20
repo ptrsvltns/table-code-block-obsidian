@@ -1,6 +1,7 @@
 import { FileSystemAdapter, MarkdownPostProcessorContext, MarkdownRenderChild, MarkdownRenderer, MarkdownSectionInformation, MarkdownView, Notice, Plugin, setIcon, TFile } from 'obsidian';
 
 import * as mine from 'mime-types';
+import { v4 as uuid } from 'uuid';
 
 import lang from './lang';
 
@@ -47,12 +48,76 @@ type Table = {
   info: TableInfo
 }
 
+type UnitEvent = {
+  id: string,
+  type: "save",
+  callback: () => void
+}
+
+if (!("path" in Event.prototype)) {
+  Object.defineProperty(Event.prototype, "path", {
+    get: function () {
+      var path = [];
+      var currentElem = this.target;
+      while (currentElem) {
+        path.push(currentElem);
+        currentElem = currentElem.parentElement;
+      }
+      if (path.indexOf(window) === -1 && path.indexOf(document) === -1)
+        path.push(document);
+      if (path.indexOf(window) === -1)
+        path.push(window);
+      return path;
+    }
+  });
+}
+
 export default class TableCodeBlock extends Plugin {
   settings: TableCodeBlockSettings;
+
+  unitEventPool: Array<UnitEvent> = [];
+
+  addUnitEvent(event: UnitEvent) {
+    for (let i = this.unitEventPool.length - 1; i >= 0; i--) {
+      if (this.unitEventPool[i].id === event.id) {
+        this.unitEventPool.splice(i, 1);
+      }
+    }
+    this.unitEventPool.push(event);
+  }
+
+  emitUnitEvent(type: string) {
+    for (let i = this.unitEventPool.length - 1; i >= 0; i--) {
+      if (this.unitEventPool[i].type === type) {
+        let event = this.unitEventPool.splice(i, 1);
+        for (let e of event) {
+          e.callback();
+        }
+      }
+    }
+  }
 
   async onload() {
     await this.loadSettings();
 
+    this.mouseup = (e: MouseEvent) => {
+      for (let el of e.path) {
+        if (el.classList && el.classList.contains("table-block-area")) {
+          this.hasFocus = true;
+          return;
+        }
+      }
+      this.hasFocus = false;
+      this.emitUnitEvent("save");
+    };
+    window.addEventListener("mouseup", this.mouseup);
+    this.blur = () => {
+      if (!document.hasFocus()) {
+        this.hasFocus = false;
+        this.emitUnitEvent("save");
+      }
+    };
+    window.addEventListener("blur", this.blur, true);
     const block = this.registerMarkdownCodeBlockProcessor("tb", async (source, el, ctx) => {
       const render = new RenderTable(this, ctx, el);
       render.loadTable(source);
@@ -61,8 +126,14 @@ export default class TableCodeBlock extends Plugin {
     block.sortOrder = -100;
   }
 
+  hasFocus = false;
+
+  mouseup: any = null;
+  blur: any = null;
+
   onunload() {
-    
+    window.removeEventListener("mouseup", this.mouseup);
+    window.removeEventListener("blur", this.blur, true);
   }
 
   async loadSettings() {
@@ -82,9 +153,9 @@ class RenderTable {
     public plugin: TableCodeBlock,
     public ctx: MarkdownPostProcessorContext,
     public el: HTMLElement
-  ) {
-  }
+  ) { }
 
+  id = uuid();
   table: Table;
   selectedRow: Row | null = null;
   selectedCells: Array<Cell> = [];
@@ -237,7 +308,11 @@ class RenderTable {
     } catch { }
     this.cellTextarea = null;
     this.selectedCell.info.el.removeClass("table-block-cell-edit");
-    if (changed) this.saveTable();
+    if (changed) {
+      this.saveTable();
+      this.createCellContent(this.selectedCell);
+      this.cellRenderMarkdown(this.selectedCell);
+    }
   }
 
   encryptCellValue(value: string) {
@@ -248,7 +323,6 @@ class RenderTable {
     let value = cell.value;
     return value.replace(/\<br line\/\>/g, "\n").replace(/\\`/g, "`");
   }
-
 
   convertEmbedToMarkdown(value: string) {
     let reg = /!\[\[([^]*?)\]\]/gm;
@@ -318,7 +392,7 @@ class RenderTable {
   }
 
   saveTimer: NodeJS.Timeout | null = null;
-  saveTable() {
+  saveTable(force: boolean = false) {
     if (this.saveTimer) clearTimeout(this.saveTimer);
     this.saveTimer = setTimeout(() => {
       try {
@@ -326,14 +400,30 @@ class RenderTable {
         const view = this.plugin.app.workspace.getActiveViewOfType(MarkdownView);
         const section = this.ctx.getSectionInfo(this.el);
         if (!view || !section) return;
-        view.editor.replaceRange("```tb\n" + content + "\n```", {
-          line: section.lineStart,
-          ch: 0
-        }, {
-          line: section.lineEnd,
-          ch: view.editor.getLine(section.lineEnd).length
-        });
-        view.requestSave();
+        const save = () => {
+          let scroll = view.editor.getScrollInfo();
+          view.editor.replaceRange("```tb\n" + content + "\n```", {
+            line: section.lineStart,
+            ch: 0
+          }, {
+            line: section.lineEnd,
+            ch: view.editor.getLine(section.lineEnd).length
+          });
+          view.requestSave();
+          view.editor.scrollTo(scroll.left, scroll.top);
+          setTimeout(() => {
+            view.editor.scrollTo(scroll.left, scroll.top);
+          }, 0);
+        };
+        if (this.plugin.hasFocus && !force) {
+          this.plugin.addUnitEvent({
+            id: this.id,
+            type: "save",
+            callback: save
+          });
+        } else {
+          save();
+        }
       } catch { }
     }, 1);
   }
@@ -367,7 +457,7 @@ class RenderTable {
             e.stopPropagation();
             this.selectedRow!.info.head = !this.selectedRow!.info.head;
             this.updateIndex();
-            this.saveTable();
+            this.saveTable(true);
           }
         }),
         createElement("button", {
@@ -382,7 +472,7 @@ class RenderTable {
             e.stopPropagation();
             this.table.rows.splice(this.selectedRow!.info.index, 1);
             this.updateIndex();
-            this.saveTable();
+            this.saveTable(true);
           }
         }),
         createElement("button", {
@@ -400,7 +490,7 @@ class RenderTable {
               r.cells.splice(selectedIndex, 1);
             }
             this.updateIndex();
-            this.saveTable();
+            this.saveTable(true);
           }
         }),
       ]),
@@ -423,7 +513,7 @@ class RenderTable {
               });
             }
             this.updateIndex();
-            this.saveTable();
+            this.saveTable(true);
           }
         }),
         createElement("button", {
@@ -444,7 +534,7 @@ class RenderTable {
               });
             }
             this.updateIndex();
-            this.saveTable();
+            this.saveTable(true);
           }
         }),
         createElement("button", {
@@ -461,7 +551,7 @@ class RenderTable {
             this.fixCells(row, this.table.info.columnCount);
             this.table.rows.splice(this.selectedRow!.info.index, 0, row);
             this.updateIndex();
-            this.saveTable();
+            this.saveTable(true);
           }
         }),
         createElement("button", {
@@ -478,7 +568,7 @@ class RenderTable {
             this.fixCells(row, this.table.info.columnCount);
             this.table.rows.splice(this.selectedRow!.info.index + 1, 0, row);
             this.updateIndex();
-            this.saveTable();
+            this.saveTable(true);
           }
         })
       ])
@@ -491,15 +581,20 @@ class RenderTable {
     const file = this.plugin.app.vault.getAbstractFileByPath(this.ctx.sourcePath);
     if (file) {
       const conponent = new MarkdownRenderChild(cell.info.el);
-      const el = cell.info.innerEl || document.createElement("div");
-      if (el.parentElement !== cell.info.el || el.parentNode !== cell.info.el) cell.info.el.append(el);
+      if (!cell.info.innerEl) this.createCellContent(cell);
       await MarkdownRenderer.renderMarkdown(this.convertCellValueForMarkdown(cell), cell.info.innerEl!, file.parent.path, conponent);
     }
   }
 
   createCellContent(cell: Cell) {
     if (!cell.info.el) return;
+    if (cell.info.innerEl && (cell.info.innerEl.parentElement || cell.info.innerEl.parentNode)) {
+      cell.info.innerEl.remove();
+    }
     cell.info.innerEl = createElement("div", { class: "table-block-cell" });
+    if (cell.info.borderEl && (cell.info.borderEl.parentElement || cell.info.borderEl.parentNode)) {
+      cell.info.borderEl.remove();
+    }
     cell.info.borderEl = createElement("div", { class: "table-block-cell-border" });
     cell.info.el.append(cell.info.innerEl);
     cell.info.el.append(cell.info.borderEl);
@@ -560,7 +655,6 @@ class RenderTable {
       class: "table-block-area",
       click: (el, e) => {
         if (el !== e.target) return;
-        this.saveCellTextareaValue();
         this.clearSelect();
       }
     });
@@ -617,7 +711,7 @@ class RenderTable {
           });
         }
         this.table.info.columnCount++;
-        this.saveTable();
+        this.saveTable(true);
       }
     })
     setIcon(rightAdd, "plus", 18);
@@ -641,7 +735,7 @@ class RenderTable {
         this.fixCells(row, this.table.info.columnCount);
         this.table.rows.push(row);
         this.table.info.rowCount = this.table.rows.length;
-        this.saveTable();
+        this.saveTable(true);
       }
     })
     setIcon(rightBottom, "plus", 18);
