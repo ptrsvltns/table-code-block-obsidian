@@ -6,7 +6,7 @@ on:
       - "*"
 
 env:
-  PLUGIN_NAME: table-codeblock-obsidian
+  PLUGIN_NAME: table-code-block-obsidian
 
 jobs:
   build:
