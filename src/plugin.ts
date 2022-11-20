@@ -1,4 +1,7 @@
-import { MarkdownPostProcessorContext, MarkdownRenderChild, MarkdownRenderer, MarkdownSectionInformation, MarkdownView, Plugin, setIcon } from 'obsidian';
+import { FileSystemAdapter, MarkdownPostProcessorContext, MarkdownRenderChild, MarkdownRenderer, MarkdownSectionInformation, MarkdownView, Notice, Plugin, setIcon, TFile } from 'obsidian';
+
+import * as mine from 'mime-types';
+
 import lang from './lang';
 
 import { createElement } from './util/dom';
@@ -86,7 +89,7 @@ class RenderTable {
   selectedRow: Row | null = null;
   selectedCells: Array<Cell> = [];
   selectedCell: Cell | null = null;
-  cellInput: HTMLInputElement | null = null;
+  cellTextarea: HTMLTextAreaElement | null = null;
   bar: HTMLElement | null = null;
 
   updateIndex() {
@@ -131,7 +134,7 @@ class RenderTable {
       const exec = /([0-9]+)[^|]*x[^|]*([0-9]+)/gmi.exec(content);
       if (exec) {
         const rows = parseInt(exec[2]);
-        const columns = parseInt(exec[2]);
+        const columns = parseInt(exec[1]);
         if (rows && columns) {
           for (let r = 0; r < rows; r++) {
             const row: Row = {
@@ -210,7 +213,7 @@ class RenderTable {
         lines.push(`|${head.join("|")}|`);
       }
     }
-    return lines.join("\r\n");
+    return lines.join("\n");
   }
 
   fixCells(row: Row, length: number) {
@@ -224,14 +227,106 @@ class RenderTable {
     return row;
   }
 
+  saveCellTextareaValue() {
+    if (!this.cellTextarea || !this.selectedCell || !this.selectedCell.info.el) return;
+    let value = this.encryptCellValue(this.cellTextarea.value);
+    const changed = this.selectedCell.value !== value;
+    if (changed) this.selectedCell.value = value;
+    try {
+      if (this.cellTextarea.parentElement || this.cellTextarea.parentNode) this.cellTextarea.remove();
+    } catch { }
+    this.cellTextarea = null;
+    this.selectedCell.info.el.removeClass("table-block-cell-edit");
+    if (changed) this.saveTable();
+  }
+
+  encryptCellValue(value: string) {
+    return value.replace(/\n/g, "<br line/>").replace(/`/g, "\\`");
+  }
+
+  convertCellValueForEdit(cell: Cell) {
+    let value = cell.value;
+    return value.replace(/\<br line\/\>/g, "\n").replace(/\\`/g, "`");
+  }
+
+
+  convertEmbedToMarkdown(value: string) {
+    let reg = /!\[\[([^]*?)\]\]/gm;
+    let matches = value.match(reg);
+    if (matches) {
+      for (let match of matches) {
+        let exec = reg.exec(match);
+        if (exec) {
+          let link = decodeURI(exec[1]);
+          const file = this.plugin.app.vault.getAbstractFileByPath(link);
+          const type = file ? mine.lookup(file.path) : null;
+          if (type && type.contains("image") && file) {
+            if (this.plugin.app.vault.adapter instanceof FileSystemAdapter) {
+              const url = "app://local/" + this.plugin.app.vault.adapter.getFullPath(file.path)
+              while (true) {
+                const temp = value.replace(match, `<img src="${encodeURI(url)}"/>`);
+                if (value == temp) break;
+                value = temp;
+              }
+            }
+          } else {
+            while (true) {
+              const temp = value.replace(match, `[[${file?.path || link}]]`);
+              if (value == temp) break;
+              value = temp;
+            }
+          }
+        }
+      }
+    }
+    return value;
+  }
+
+  convertImageToMarkdown(value: string) {
+    let reg = /!\[([^]*?)\]\(([^]*?)\)/gm;
+    let matches = value.match(reg);
+    if (matches) {
+      for (let match of matches) {
+        let exec = reg.exec(match);
+        if (exec) {
+          let render = exec[1];
+          render = this.convertEmbedToMarkdown(render);
+          let link = decodeURI(exec[2]);
+          const file = this.plugin.app.vault.getAbstractFileByPath(link);
+          const type = file ? mine.lookup(file.path) : null;
+          if (type && type.contains("image") && file) {
+            if (this.plugin.app.vault.adapter instanceof FileSystemAdapter) {
+              const url = "app://local/" + this.plugin.app.vault.adapter.getFullPath(file.path)
+              while (true) {
+                const temp = value.replace(match, `<img src="${encodeURI(url)}" title="${render}"/>`);
+                if (value == temp) break;
+                value = temp;
+              }
+            }
+          }
+        }
+      }
+    }
+    return value;
+  }
+
+  convertCellValueForMarkdown(cell: Cell) {
+    let value = this.convertCellValueForEdit(cell);
+    value = this.convertEmbedToMarkdown(value);
+    value = this.convertImageToMarkdown(value);
+    return value;
+  }
+
+  saveTimer: NodeJS.Timeout | null = null;
   saveTable() {
-    setTimeout(() => {
+    if (this.saveTimer) clearTimeout(this.saveTimer);
+    this.saveTimer = setTimeout(() => {
       try {
         const content = this.toMarkdown(this.table);
         const view = this.plugin.app.workspace.getActiveViewOfType(MarkdownView);
         const section = this.ctx.getSectionInfo(this.el);
         if (!view || !section) return;
-        view.editor.replaceRange("```tb\r\n" + content + "\r\n```", {
+        view.editor.replaceRange("```tb\n" + content + "\n```", {
           line: section.lineStart,
           ch: 0
         }, {
@@ -240,7 +335,7 @@ class RenderTable {
         });
         view.requestSave();
       } catch { }
-    }, 10);
+    }, 1);
   }
 
   clearSelect() {
@@ -391,27 +486,14 @@ class RenderTable {
     return bar;
   }
 
-  saveInputValue() {
-    setTimeout(() => {
-      if (!this.cellInput || !this.selectedCell || !this.selectedCell.info.el) return;
-      const value = this.cellInput.value;
-      const changed = this.selectedCell.value !== value;
-      if (changed) this.selectedCell.value = value;
-      try {
-        if (this.cellInput.parentElement === this.selectedCell.info.el) this.cellInput.remove();
-      } catch { }
-      this.cellInput = null;
-      this.selectedCell.info.el.removeClass("table-block-cell-edit");
-      if (changed) this.saveTable();
-    }, 10);
-  }
-
-  async renderCellToMarkdown(cell: Cell) {
+  async cellRenderMarkdown(cell: Cell) {
     if (!cell.info.el) return;
     const file = this.plugin.app.vault.getAbstractFileByPath(this.ctx.sourcePath);
     if (file) {
       const conponent = new MarkdownRenderChild(cell.info.el);
-      await MarkdownRenderer.renderMarkdown(cell.value, cell.info.innerEl!, file.parent.path, conponent);
+      const el = cell.info.innerEl || document.createElement("div");
+      if (el.parentElement !== cell.info.el || el.parentNode !== cell.info.el) cell.info.el.append(el);
+      await MarkdownRenderer.renderMarkdown(this.convertCellValueForMarkdown(cell), cell.info.innerEl!, file.parent.path, conponent);
     }
   }
 
@@ -440,26 +522,33 @@ class RenderTable {
         cell.info.borderEl!.addClass("table-block-cell-selected");
       },
       dblclick: (el) => {
+        if (this.saveTimer) clearTimeout(this.saveTimer);
+
+        try {
+          if (this.cellTextarea && (this.cellTextarea.parentElement || this.cellTextarea.parentNode)) this.cellTextarea.remove();
+        } catch { }
+        this.cellTextarea = null;
+
         this.selectedCell = cell;
         el.addClass("table-block-cell-edit");
-        this.cellInput = createElement("input", {
-          class: "table-block-cell-input",
-          value: cell.value,
+        this.cellTextarea = createElement("textarea", {
+          class: "table-block-cell-textarea",
+          value: this.convertCellValueForEdit(cell),
           on: {
-            blur: () => {
-              this.saveInputValue();
-            },
-            keyup: (_, e: KeyboardEvent) => {
-              if (e.key === 'Enter') this.saveInputValue();
+            blur: (el) => {
+              try {
+                if (el.parentElement || el.parentNode) el.remove();
+              } catch {}
+              this.saveCellTextareaValue();
             }
           }
         });
-        el.append(this.cellInput);
-        this.cellInput.focus();
+        el.append(this.cellTextarea);
+        this.cellTextarea.focus();
       }
     });
     this.createCellContent(cell);
-    this.renderCellToMarkdown(cell);
+    this.cellRenderMarkdown(cell);
     return cell;
   }
 
@@ -471,7 +560,7 @@ class RenderTable {
       class: "table-block-area",
       click: (el, e) => {
         if (el !== e.target) return;
-        this.saveInputValue();
+        this.saveCellTextareaValue();
         this.clearSelect();
       }
     });
@@ -560,7 +649,9 @@ class RenderTable {
 
     this.el.empty();
     this.el.append(area);
+
+
+    this.el.append();
   }
 
-  
 }
