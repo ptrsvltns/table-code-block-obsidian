@@ -51,6 +51,7 @@
 
 .table-block-cell-edit {
   padding-right: 150px!important;
+  padding-bottom: 150px!important;
 }
 
 .table-block-cell-edit .table-block-cell {
@@ -61,7 +62,7 @@
   opacity: 0;
 }
 
-.table-block-cell-input {
+.table-block-cell-textarea {
   position: absolute;
   left: 0;
   top: 0;

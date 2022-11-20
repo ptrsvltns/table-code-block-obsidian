@@ -10,9 +10,11 @@ Table Code Block in Obsidian:
 - Set Head Row  
 - Insert To Left Top Right Bottom  
 - Quick Create Table  
+- Multi Lines  
 - Render  
   - Headings  
   - Links  
+  - Image  
   - Checkbox  
   - HTML  
   - Bold  
@@ -25,9 +27,7 @@ Table Code Block in Obsidian:
 
 ## Not Support  
 
-- Image  
-- Code Block  
-- Escaping Backticks  
+- Inline Embed  
 
 ## Demo
 

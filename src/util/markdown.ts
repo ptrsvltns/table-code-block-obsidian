@@ -1,9 +1,10 @@
 export function parseTableRowFromLine(text: string): Array<string> {
-  const support = ["[", "(", "{", "`", "'", '"'];
+  const support = ["[", "(", "{", "<", "`", "'", '"'];
   const flags: Record<string, string> = {
     "[": "]",
     "(": ")",
     "{": "}",
+    "<": ">",
     "`": "`",
     "'": "'",
     '"': '"'
