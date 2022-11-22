@@ -1,6 +1,6 @@
 {
 	"name": "table-code-block-obsidian",
-	"version": "1.0.3",
+	"version": "1.0.6",
 	"description": "Table Code Block",
 	"main": "main.js",
 	"scripts": {

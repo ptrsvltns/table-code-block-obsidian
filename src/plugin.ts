@@ -635,14 +635,21 @@ class RenderTable {
       if (!cell.info.innerEl) this.createCellContent(cell);
       const value = this.convertCellValueForMarkdown(cell);
       await MarkdownRenderer.renderMarkdown(value, cell.info.innerEl!, file.parent.path, conponent);
-      if (value && !/[\\\|\/\[\]`<>\n]/g.test(value)) {
+      if (value && !/[\\\|\/\[\]`<>]/g.test(value)) {
         cell.info.innerEl!.style.minWidth = "100%";
-        if (value.length < 10) {
-          cell.info.innerEl!.style.width = (value.length * 18) + "px";
-        } else if (value.length < 20) {
-          cell.info.innerEl!.style.width = (value.length * 9) + "px";
+        let max = value.length;
+        if (/\n/g.test(value)) {
+          const lines = value.split("\n");
+          for (let l of lines) {
+            if (max < l.length) max = l.length;
+          }
+        }
+        if (max < 10) {
+          cell.info.innerEl!.style.width = (max * 18) + "px";
+        } else if (max < 20) {
+          cell.info.innerEl!.style.width = (max * 9) + "px";
         } else {
-          cell.info.innerEl!.style.width = (value.length * 6) + "px";
+          cell.info.innerEl!.style.width = (max * 6) + "px";
         }
       }
     }
