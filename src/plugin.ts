@@ -79,12 +79,16 @@ export default class TableCodeBlock extends Plugin {
 
   unitEventPool: Array<UnitEvent> = [];
 
-  addUnitEvent(event: UnitEvent) {
+  removeUnitEvent(id: string) {
     for (let i = this.unitEventPool.length - 1; i >= 0; i--) {
-      if (this.unitEventPool[i].id === event.id) {
+      if (this.unitEventPool[i].id === id) {
         this.unitEventPool.splice(i, 1);
       }
     }
+  }
+
+  addUnitEvent(event: UnitEvent) {
+    this.removeUnitEvent(event.id);
     this.unitEventPool.push(event);
   }
 
@@ -436,12 +440,8 @@ class RenderTable {
       try {
         const save = () => {
           const content = this.toMarkdown(this.table);
-          let view = this.view;
-          let section = this.section;
-          if (!view || !section) {
-            view = this.plugin.app.workspace.getActiveViewOfType(MarkdownView);
-            section = this.ctx.getSectionInfo(this.el);
-          }
+          let view = this.plugin.app.workspace.getActiveViewOfType(MarkdownView)  || this.view;
+          let section = this.ctx.getSectionInfo(this.el) || this.section;
           if (!view || !section) {
             this.plugin.addUnitEvent({
               id: this.id,
@@ -471,6 +471,7 @@ class RenderTable {
             callback: save
           });
         } else {
+          this.plugin.removeUnitEvent(this.id);
           save();
         }
       } catch { }
@@ -628,14 +629,13 @@ class RenderTable {
 
   async cellRenderMarkdown(cell: Cell) {
     if (!cell.info.el) return;
-    let file = this.file;
-    if (!file) file = this.plugin.app.vault.getAbstractFileByPath(this.ctx.sourcePath);
+    let file = this.plugin.app.vault.getAbstractFileByPath(this.ctx.sourcePath) || this.file;
     if (file) {
       const conponent = new MarkdownRenderChild(cell.info.el);
       if (!cell.info.innerEl) this.createCellContent(cell);
       const value = this.convertCellValueForMarkdown(cell);
       await MarkdownRenderer.renderMarkdown(value, cell.info.innerEl!, file.parent.path, conponent);
-      if (!/[\\\|\/\[\]`<>\n]/g.test(value)) {
+      if (value && !/[\\\|\/\[\]`<>\n]/g.test(value)) {
         cell.info.innerEl!.style.minWidth = "100%";
         if (value.length < 10) {
           cell.info.innerEl!.style.width = (value.length * 18) + "px";
@@ -666,8 +666,7 @@ class RenderTable {
     cell.info.el = createElement(cell.info.row.info.head ? "th" : "td", {
       style: {
         position: "relative",
-        padding: "0",
-        whiteSpace: cell.info.row.info.head ? "nowrap" : ""
+        padding: "0"
       },
       click: () => {
         if (this.selectedCells) this.selectedCells.forEach((c) => c.info.el!.removeClass("table-block-selected"));
@@ -729,8 +728,7 @@ class RenderTable {
       style: {
         position: "relative",
         padding: "0",
-        margin: "0",
-        width: "unset"
+        margin: "0"
       }
     });
     area.append(table);
