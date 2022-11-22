@@ -37,6 +37,7 @@
 
 .table-block-cell > p {
   margin: var(--size-2-2) 0;
+  width: 100%;
 }
 
 .table-block-cell-border {

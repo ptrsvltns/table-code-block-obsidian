@@ -11,6 +11,8 @@ Table Code Block in Obsidian:
 - Insert To Left Top Right Bottom  
 - Quick Create Table  
 - Multi Lines  
+- Copy Cell  
+- Paste To Cell  
 - Render  
   - Headings  
   - Links  

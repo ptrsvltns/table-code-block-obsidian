@@ -1,4 +1,4 @@
-import { FileSystemAdapter, MarkdownPostProcessorContext, MarkdownRenderChild, MarkdownRenderer, MarkdownSectionInformation, MarkdownView, Notice, Plugin, setIcon, TFile } from 'obsidian';
+import { FileSystemAdapter, MarkdownPostProcessorContext, MarkdownRenderChild, MarkdownRenderer, MarkdownSectionInformation, MarkdownView, Notice, Plugin, setIcon, TAbstractFile, TFile } from 'obsidian';
 
 import * as mine from 'mime-types';
 import { v4 as uuid } from 'uuid';
@@ -7,6 +7,8 @@ import lang from './lang';
 
 import { createElement } from './util/dom';
 import { parseTableRowFromLine } from './util/markdown';
+
+import { clipboard } from 'electron';
 
 export interface TableCodeBlockSettings {
 }
@@ -97,6 +99,8 @@ export default class TableCodeBlock extends Plugin {
     }
   }
 
+  selectedTable: RenderTable | null = null;
+
   async onload() {
     await this.loadSettings();
 
@@ -118,6 +122,20 @@ export default class TableCodeBlock extends Plugin {
       }
     };
     window.addEventListener("blur", this.blur, true);
+    this.keyup = (e: KeyboardEvent) => {
+      if (this.selectedTable && this.selectedTable.selectedCell) {
+        if (e.ctrlKey && (e.key == "c" || e.key == "C")) {
+          const value = this.selectedTable.convertCellValueForMarkdown(this.selectedTable.selectedCell);
+          clipboard.writeText(value);
+          new Notice("复制成功");
+        }
+        if (e.ctrlKey && (e.key == "v" || e.key == "V")) {
+          let value = clipboard.readText();
+          this.selectedTable.setCellValue(value);
+        }
+      }
+    };
+    window.addEventListener("keyup", this.keyup);
     const block = this.registerMarkdownCodeBlockProcessor("tb", async (source, el, ctx) => {
       const render = new RenderTable(this, ctx, el);
       render.loadTable(source);
@@ -130,10 +148,12 @@ export default class TableCodeBlock extends Plugin {
 
   mouseup: any = null;
   blur: any = null;
+  keyup: any = null;
 
   onunload() {
     window.removeEventListener("mouseup", this.mouseup);
     window.removeEventListener("blur", this.blur, true);
+    window.removeEventListener("keyup", this.keyup);
   }
 
   async loadSettings() {
@@ -147,13 +167,19 @@ export default class TableCodeBlock extends Plugin {
 
 class RenderTable {
 
-  public section: MarkdownSectionInformation;
+  public section: MarkdownSectionInformation | null = null;
+  public view: MarkdownView | null = null;
+  public file: TAbstractFile | null = null;
 
   constructor(
     public plugin: TableCodeBlock,
     public ctx: MarkdownPostProcessorContext,
     public el: HTMLElement
-  ) { }
+  ) {
+    this.view = this.plugin.app.workspace.getActiveViewOfType(MarkdownView);
+    this.section = this.ctx.getSectionInfo(this.el);
+    this.file = this.plugin.app.vault.getAbstractFileByPath(this.ctx.sourcePath);
+  }
 
   id = uuid();
   table: Table;
@@ -298,6 +324,18 @@ class RenderTable {
     return row;
   }
 
+  setCellValue(value: string) {
+    if (!this.selectedCell || !this.selectedCell.info.el) return;
+    value = this.encryptCellValue(value);
+    const changed = this.selectedCell.value !== value;
+    if (changed) {
+      this.selectedCell.value = value;
+      this.saveTable();
+      this.createCellContent(this.selectedCell);
+      this.cellRenderMarkdown(this.selectedCell);
+    }
+  }
+
   saveCellTextareaValue() {
     if (!this.cellTextarea || !this.selectedCell || !this.selectedCell.info.el) return;
     let value = this.encryptCellValue(this.cellTextarea.value);
@@ -396,11 +434,22 @@ class RenderTable {
     if (this.saveTimer) clearTimeout(this.saveTimer);
     this.saveTimer = setTimeout(() => {
       try {
-        const content = this.toMarkdown(this.table);
-        const view = this.plugin.app.workspace.getActiveViewOfType(MarkdownView);
-        const section = this.ctx.getSectionInfo(this.el);
-        if (!view || !section) return;
         const save = () => {
+          const content = this.toMarkdown(this.table);
+          let view = this.view;
+          let section = this.section;
+          if (!view || !section) {
+            view = this.plugin.app.workspace.getActiveViewOfType(MarkdownView);
+            section = this.ctx.getSectionInfo(this.el);
+          }
+          if (!view || !section) {
+            this.plugin.addUnitEvent({
+              id: this.id,
+              type: "save",
+              callback: save
+            });
+            return;
+          }
           let scroll = view.editor.getScrollInfo();
           view.editor.replaceRange("```tb\n" + content + "\n```", {
             line: section.lineStart,
@@ -412,7 +461,7 @@ class RenderTable {
           view.requestSave();
           view.editor.scrollTo(scroll.left, scroll.top);
           setTimeout(() => {
-            view.editor.scrollTo(scroll.left, scroll.top);
+            if (view) view.editor.scrollTo(scroll.left, scroll.top);
           }, 0);
         };
         if (this.plugin.hasFocus && !force) {
@@ -437,6 +486,7 @@ class RenderTable {
     this.selectedCells = [];
     if (this.selectedCell) this.selectedCell.info.borderEl!.removeClass("table-block-cell-selected");
     this.selectedCell = null;
+    this.plugin.selectedTable = null;
   }
 
   buttonBar() {
@@ -578,11 +628,23 @@ class RenderTable {
 
   async cellRenderMarkdown(cell: Cell) {
     if (!cell.info.el) return;
-    const file = this.plugin.app.vault.getAbstractFileByPath(this.ctx.sourcePath);
+    let file = this.file;
+    if (!file) file = this.plugin.app.vault.getAbstractFileByPath(this.ctx.sourcePath);
     if (file) {
       const conponent = new MarkdownRenderChild(cell.info.el);
       if (!cell.info.innerEl) this.createCellContent(cell);
-      await MarkdownRenderer.renderMarkdown(this.convertCellValueForMarkdown(cell), cell.info.innerEl!, file.parent.path, conponent);
+      const value = this.convertCellValueForMarkdown(cell);
+      await MarkdownRenderer.renderMarkdown(value, cell.info.innerEl!, file.parent.path, conponent);
+      if (!/[\\\|\/\[\]`<>\n]/g.test(value)) {
+        cell.info.innerEl!.style.minWidth = "100%";
+        if (value.length < 10) {
+          cell.info.innerEl!.style.width = (value.length * 18) + "px";
+        } else if (value.length < 20) {
+          cell.info.innerEl!.style.width = (value.length * 9) + "px";
+        } else {
+          cell.info.innerEl!.style.width = (value.length * 6) + "px";
+        }
+      }
     }
   }
 
@@ -602,7 +664,11 @@ class RenderTable {
 
   createCell(cell: Cell) {
     cell.info.el = createElement(cell.info.row.info.head ? "th" : "td", {
-      style: { position: "relative", padding: "0" },
+      style: {
+        position: "relative",
+        padding: "0",
+        whiteSpace: cell.info.row.info.head ? "nowrap" : ""
+      },
       click: () => {
         if (this.selectedCells) this.selectedCells.forEach((c) => c.info.el!.removeClass("table-block-selected"));
         if (this.selectedCell) this.selectedCell.info.borderEl!.removeClass("table-block-cell-selected");
@@ -615,6 +681,7 @@ class RenderTable {
         }
         this.selectedCell = cell;
         cell.info.borderEl!.addClass("table-block-cell-selected");
+        this.plugin.selectedTable = this;
       },
       dblclick: (el) => {
         if (this.saveTimer) clearTimeout(this.saveTimer);
@@ -658,7 +725,14 @@ class RenderTable {
         this.clearSelect();
       }
     });
-    const table = createElement("table", { style: { position: "relative" } });
+    const table = createElement("table", {
+      style: {
+        position: "relative",
+        padding: "0",
+        margin: "0",
+        width: "unset"
+      }
+    });
     area.append(table);
 
     for (let r of this.table.rows) {
@@ -669,6 +743,7 @@ class RenderTable {
           click: (row, e) => {
             if (this.selectedRow && this.selectedRow.info.el !== row) this.selectedRow.info.el!.removeClass("table-block-selected");
             this.selectedRow = r;
+            this.plugin.selectedTable = this;
             row.addClass("table-block-selected");
             if (!this.bar) {
               this.bar = this.buttonBar();
